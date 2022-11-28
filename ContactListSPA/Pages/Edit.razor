@@ -1,0 +1,223 @@
+﻿@page "/edit/{ContactID}"
+
+@using ContactListSPA.Shared.Models
+@using System.Net.Http.Headers
+@using System.Net
+@using ContactListSPA.Shared.Services
+@using Newtonsoft.Json
+@inject User User
+@inject HttpClient Http
+@inject IAPICaller ApiCaller
+    
+<PageTitle>Edit</PageTitle>
+<p>@info</p>
+    <h3>Details:</h3>
+        <p>First name: @contactDetails.Person.FirstName</p>
+        <p>Last name: @contactDetails.Person.LastName</p>
+        <p>Birthdate: @contactDetails.Person.Birthdate</p>
+        <p>Email: @contactDetails.Email</p>
+        <p>Phone number: @contactDetails.PhoneNumber</p>
+        <p>Category: @contactDetails.Category.Name</p>
+        <p>Subcategory: @contactDetails.Subcategory?.Name</p>
+        <p>Password hash: @contactDetails.PasswordHash</p>
+
+    <h3>New data</h3>
+<EditForm Model="@contact" OnValidSubmit="EditContact">
+            <InputSelect id="person" @bind-Value="personId">
+        @foreach (var person in people)
+        {
+                        <option value="@person.Id">@person.FirstName @person.LastName</option>
+        }
+            </InputSelect><br/>
+            <input type="email" @bind-value="@contact.Email" placeholder="Enter email"/><br/>
+            <input type="text" @bind-value="@contact.PhoneNumber" placeholder="Enter phone number"/><br/>
+            <InputSelect id="category" @bind-Value="categoryId">
+        @foreach (var category in categories)
+        {
+                        <option value="@category.Id">@category.Name</option>
+        }
+            </InputSelect><br/>
+    @*If slected category is "business" we want to chose a subcategory from the database.*@
+    @if (categoryId == businessCategory?.Id)
+    {
+                        <InputSelect id="subcategory" @bind-Value="subcategoryId">
+            @foreach (var subcategory in subcategories)
+            {
+                                    <option value="@subcategory.Id">@subcategory.Name</option>
+            }
+                        </InputSelect>
+
+        <br/>
+    }
+    @*If slected category is "other" we want to grab it from the user.*@
+    else if (categoryId == otherCategory?.Id)
+    {
+                    <input type="text" @bind-value="@subcategoryToAdd.Name" placeholder="Enter subcategory"/>
+
+        <br/>
+    }
+            <input type="password" @bind-value="@contact.PasswordHash" placeholder="Enter password"/><br/>
+            <DataAnnotationsValidator/>
+            <ValidationSummary/>
+            <button class="btn btn-primary">Update</button>
+        </EditForm>
+
+@code {
+    [Parameter]
+    public string ContactId { get; set; } = "invalid";
+    ContactModel contact = new();
+    ContactModel? contactDetails = new();
+    List<PersonModel> people = new();
+    List<CategoryModel> categories = new();
+    List<SubcategoryModel> subcategories = new();
+    CategoryModel? businessCategory, otherCategory;
+    SubcategoryModel subcategoryToAdd = new();
+    int personId;
+    int categoryId;
+    int subcategoryId;
+    string info = string.Empty;
+
+    // Reads data from the database to store the person that we wish to edit
+    // and available Person, Category and Subcategory options.
+    // Writes "Business" category and "Other" category to variables (if they exist in the database) to ensure
+    // that a subcategory from the list will be chosen if Business is chosen, or that
+    // the user will be able to provide the subcategory if Other is chosen
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            contactDetails = await ReadOne<ContactModel>($"Contacts/{ContactId}");
+            if (contactDetails == null)
+                throw new ArgumentNullException();
+            PersonModel[]? personModels = await ReadAll<PersonModel>("People");
+            if (personModels != null)
+                people.AddRange(personModels);
+            personId = people.Count;
+
+            CategoryModel[]? categorieModels = await ReadAll<CategoryModel>("Categories");
+            if (categorieModels != null)
+                categories.AddRange(categorieModels);
+            categoryId = categories.Count;
+
+            foreach (CategoryModel category in categories)
+            {
+                switch (category.Name)
+                {
+                    case "Business":
+                        businessCategory = category;
+                        break;
+                    case "Other":
+                        otherCategory = category;
+                        break;
+                }
+            }
+
+            SubcategoryModel[]? subcategorieModels = await ReadAll<SubcategoryModel>("Subcategories");
+            if (subcategorieModels != null)
+                subcategories.AddRange(subcategorieModels);
+            subcategoryId = subcategories.Count;
+
+        }
+        catch (Exception)
+        {
+            info = "Error connecting to the API!";
+        }
+    }
+
+    // Reads a type T model from the http response and deserializes it.
+    private async Task<T?> ReadOne<T>(string endpoint)
+    {
+        var httpResponse = await ApiCaller.SendRequest("GET", endpoint, new AuthenticationHeaderValue("Bearer", User.Token));
+        if (httpResponse.StatusCode == HttpStatusCode.OK)
+        {
+            string jsonResponse = await httpResponse.Content.ReadAsStringAsync();
+            return JsonConvert.DeserializeObject<T>(jsonResponse);
+        }
+        else if (httpResponse.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            if (User.IsLoggedIn)
+                info = "Token expired!";
+            else
+                info = "Unauthorized!";
+        }
+        return default(T);
+    }
+
+    // Reads every type T model from the http response and deserializes it to an array.
+    private async Task<T[]?> ReadAll<T>(string endpoint)
+    {
+        var httpResponse = await ApiCaller.SendRequest("GET", endpoint, new AuthenticationHeaderValue("Bearer", User.Token));
+        if (httpResponse.StatusCode == HttpStatusCode.OK)
+        {
+            string jsonResponse = await httpResponse.Content.ReadAsStringAsync();
+            return JsonConvert.DeserializeObject<T[]>(jsonResponse);
+        }
+        else if (httpResponse.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            if (User.IsLoggedIn)
+                info = "Token expired!";
+            else
+                info = "Unauthorized!";
+        }
+        return default(T[]);
+    }
+
+    // Makes an http PUT request to add a contact to the database.
+    private async Task EditContact()
+    {
+        try
+        {
+            int? subId = null;
+            // If "other" category was selected we want to write the user inputed subcategory to the database,
+            // and then asssign it to the subId
+            if (categoryId == otherCategory?.Id)
+            {
+                HttpContent subcategoryContent = JsonContent.Create(new { Name = subcategoryToAdd.Name });
+                var subcategoryHttpResponse = await ApiCaller.SendRequest("POST", "Subcategories", new AuthenticationHeaderValue("Bearer", User.Token), content: subcategoryContent);
+                if (subcategoryHttpResponse.StatusCode == HttpStatusCode.OK)
+                {
+                    string jsonResponse = await subcategoryHttpResponse.Content.ReadAsStringAsync();
+                    subcategoryToAdd = JsonConvert.DeserializeObject<SubcategoryModel>(jsonResponse)!;
+                    subId = subcategoryToAdd.Id;
+                }
+                else
+                {
+                    subId = null;
+                }
+            }
+            // If business is selected we want to assign the selected subcategory to subId
+            else if (categoryId == businessCategory?.Id)
+            {
+                subId = subcategoryId;
+            }
+
+            APIContactModel apiContact = new()
+                {
+                    PersonId = personId,
+                    Email = contact.Email,
+                    PhoneNumber = contact.PhoneNumber,
+                    CategoryId = categoryId,
+                    SubcategoryID = subId,
+                    Password = contact.PasswordHash
+                };
+            HttpContent content = JsonContent.Create(apiContact);
+            var httpResponse = await ApiCaller.SendRequest("PUT", $"Contacts/{ContactId}", new AuthenticationHeaderValue("Bearer", User.Token), content: content);
+            if (httpResponse.StatusCode == HttpStatusCode.OK)
+            {
+                info = "Contact updated!";
+            }
+            else
+            {
+                info = await httpResponse.Content.ReadAsStringAsync();
+            }
+        }
+        catch
+        {
+            info = "Error connecting to the API!";
+        }
+        finally
+        {
+            contact = new();
+        }
+    }
+}

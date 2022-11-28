@@ -1,0 +1,149 @@
+﻿@page "/contactlist"
+@using ContactListSPA.Shared.Models
+@using System.Net
+@using System.Text.Json
+@using ContactListSPA.Shared.Services
+@using Newtonsoft.Json
+@using System.Net.Http.Headers
+@inject HttpClient Http
+@inject User User
+@inject NavigationManager Navigation
+@inject IAPICaller ApiCaller
+
+<PageTitle>Contact List</PageTitle>
+
+<h1>Contact List</h1>
+<p>@userInfo</p>
+<p>@info</p>
+
+@if (openContacts == null)
+{
+    <p><em>Loading...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Id</th>
+                <th>First name</th>
+                <th>Last name</th>
+                <th>Category</th>
+                <th>Subcategory</th>
+                @if(User.IsLoggedIn)
+                {
+                    <th>Options</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var openContact in openContacts)
+            {
+                <tr>
+                    <td>@openContact.Id</td>
+                    <td>@openContact.FirstName</td>
+                    <td>@openContact.LastName</td>
+                    <td>@openContact.Category</td>
+                    <td>@openContact.Subcategory</td>
+                    @if (User.IsLoggedIn)
+                    {
+                                   <td>
+                                   <button class="btn btn-primary" @onclick="() => GetContactDetails(openContact.Id)">Details</button>
+                                   <button class="btn btn-primary" @onclick="() => EditContact(openContact.Id)">Edit</button>
+                                   <button class="btn btn-primary" @onclick="() => DeleteContact(openContact.Id)">Delete</button>
+                                   </td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </table>
+    @if (User.IsLoggedIn)
+    {
+        <button class="btn btn-primary" @onclick="AddContact">Add Contact</button>
+    }
+
+    @if (User.IsLoggedIn && contactDetails != null)
+    {
+        <p>Details:</p>
+        <p>First name: @contactDetails.Person.FirstName</p>
+        <p>Last name: @contactDetails.Person.LastName</p>
+        <p>Birthdate: @contactDetails.Person.Birthdate</p>
+        <p>Email: @contactDetails.Email</p>
+        <p>Phone number: @contactDetails.PhoneNumber</p>
+        <p>Category: @contactDetails.Category.Name</p>
+        <p>Subcategory: @contactDetails.Subcategory?.Name</p>
+        <p>Password hash: @contactDetails.PasswordHash</p>
+    }
+}
+
+@code {
+    private OpenContactModel[]? openContacts;
+    private ContactModel? contactDetails;
+    private string userInfo = string.Empty;
+    private string info = string.Empty;
+
+    // On initialization read OpenContacts from the database
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            openContacts = await GetOpenContactsAsync();
+            userInfo = User.IsLoggedIn ? $"Logged in as {User.Username}." : "Working as a guest.";
+        }
+        catch(Exception)
+        {
+            info = "Problem occured while fetching the data from the API.";
+        }
+    }
+
+    private void AddContact() => Navigation.NavigateTo("/add");
+
+    private async Task<OpenContactModel[]?> GetOpenContactsAsync()
+    {
+        var httpResponse = await ApiCaller.SendRequest("GET", "OpenContacts");
+        if (httpResponse.StatusCode == HttpStatusCode.OK)
+        {
+            string jsonResponse = await httpResponse.Content.ReadAsStringAsync();
+            return JsonConvert.DeserializeObject<OpenContactModel[]>(jsonResponse);
+        }
+        else
+        {
+            return null;
+        }
+    }
+    // GET request
+    private async Task GetContactDetails(int id)
+    {
+        var httpResponse = await ApiCaller.SendRequest("GET", $"Contacts/{id}", new AuthenticationHeaderValue("Bearer", User.Token));
+        if (httpResponse.StatusCode == HttpStatusCode.OK)
+        {
+            string jsonResponse = await httpResponse.Content.ReadAsStringAsync();
+            contactDetails = JsonConvert.DeserializeObject<ContactModel>(jsonResponse);
+        }
+        else if(httpResponse.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            if (User.IsLoggedIn)
+                info = "Token expired!";
+            else
+                info = "Unauthorized!";
+        }
+    }
+
+    private void EditContact(int id) => Navigation.NavigateTo($"/edit/{id}");
+
+    private async Task DeleteContact(int id)
+    {
+        var httpResponse = await ApiCaller.SendRequest("DELETE", $"Contacts/{id}", new AuthenticationHeaderValue("Bearer", User.Token));
+        if (httpResponse.StatusCode == HttpStatusCode.OK)
+        {
+            info = $"Contact id={id} was deleted.";
+        }
+        else if (httpResponse.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            if (User.IsLoggedIn)
+                info = "Token expired!";
+            else
+                info = "Unauthorized!";
+        }
+    }
+}

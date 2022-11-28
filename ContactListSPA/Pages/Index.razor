@@ -1,0 +1,63 @@
+﻿@page "/"
+
+@using System.Net.Http.Headers
+@using ContactListSPA.Shared.Models
+@using System.Net
+@using ContactListSPA.Shared.Services
+@inject HttpClient Http
+@inject User User
+@inject IAPICaller ApiCaller
+
+<PageTitle>Login</PageTitle>
+
+@if (!User.IsLoggedIn)
+{
+        <h3>Login</h3>
+        <EditForm Model="@login" OnValidSubmit="PostLoginInfo">
+            <input type="text" @bind-value="@login.Username" placeholder="Enter username"/><br/>
+            <input type="password" @bind-value="@login.Password" placeholder="Enter password"/><br/>
+            <DataAnnotationsValidator/>
+            <ValidationSummary/>
+            <button class="btn btn-primary">Login</button>
+        </EditForm>
+        <br/>
+        <p>@response</p>
+}
+else
+{
+        <h1>Welcome, @User.Username!</h1>
+}
+
+@code {
+    private LoginModel login = new();
+    private string response = string.Empty;
+
+    private async Task PostLoginInfo()
+    {
+        try
+        {
+            var httpResponse = await ApiCaller.SendRequest("POST", "Users", content: JsonContent.Create(login));
+            if (httpResponse.StatusCode == HttpStatusCode.OK)
+            {
+                response = "User logged in successfully.";
+                User.Username = login.Username;
+                User.Token = await httpResponse.Content.ReadAsStringAsync();
+                User.IsLoggedIn = true;
+            }
+            else
+            {
+                User.Token = string.Empty;
+                User.IsLoggedIn = false;
+                response = await httpResponse.Content.ReadAsStringAsync();
+            }
+        }
+        catch
+        {
+            response = "Error contecting to the API!";
+        }
+        finally
+        {
+            login = new();
+        }
+    }
+}
